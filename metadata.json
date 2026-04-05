@@ -1,0 +1,5 @@
+{
+  "name": "Etsy Listing Generator",
+  "description": "AI-powered dashboard to generate, edit, and manage Etsy listings from scraped product data.",
+  "requestFramePermissions": []
+}
