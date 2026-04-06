@@ -215,16 +215,17 @@ export default function App() {
       quantity: data.quantity
     };
 
-    // Try chrome.storage.local (for extension environment)
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.set({ listingData: payload }, () => {
-        showStatus('success', '✅ Data pushed to extension!');
-      });
-    } else {
-      // Fallback to localStorage for testing in browser
-      localStorage.setItem('listingData', JSON.stringify(payload));
-      showStatus('success', 'Saved to localStorage (Extension Fallback)');
-    }
+    // Send message to Chrome Extension via window.postMessage
+    // This is the standard way for a web page to talk to a content script
+    window.postMessage({
+      type: "SET_ETSY_DATA",
+      payload: payload
+    }, "*");
+
+    // Also save to localStorage as a backup/fallback
+    localStorage.setItem('listingData', JSON.stringify(payload));
+    
+    showStatus('success', '✅ Sent to extension!');
   };
 
   const handleUpdateField = (field: keyof ListingData, value: any) => {
