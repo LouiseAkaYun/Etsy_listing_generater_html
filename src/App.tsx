@@ -116,10 +116,9 @@ export default function App() {
   // --- Text Cleaning Logic ---
   const cleanText = (text: string) => {
     return text
-      .replace(/\s+/g, ' ') // Remove extra whitespace
-      .replace(/收藏|客服|立即购买|加入购物车/g, '') // Remove noise words
-      .trim()
-      .slice(0, 3000); // Limit to 3000 chars
+      .replace(/\s+/g, ' ')
+      .replace(/收藏|客服|立即购买|加入购物车/g, '')
+      .slice(0, 3000);
   };
 
   // --- AI Logic ---
@@ -140,39 +139,21 @@ export default function App() {
       const cleanedContent = cleanText(rawInput);
       
       const prompt = `
-        You are an Etsy SEO expert.
-        The input may contain Chinese or mixed-language product content.
-        Your job:
-        1. Translate ALL content into natural, fluent English.
-        2. Extract key product information.
-        3. Rewrite it into a high-converting Etsy listing.
-        
-        Based on the content below:
-        
-        [CONTENT]
+        You are an Etsy SEO expert and translator.
+
+        Convert the following product content into a high-converting Etsy listing.
+
+        CONTENT:
         ${cleanedContent}
-        
-        Do the following:
-        1. Identify:
-           - Product name
-           - Key features
-           - Materials
-           - Target audience
-           - Use cases
-        2. Generate:
-           - Title (≤140 characters): Clear, keyword-rich, natural English. Avoid awkward literal translations.
-           - Description: Engaging and benefit-focused, written for US buyers. Highlight use cases and emotional appeal.
-           - 13 SEO Tags: Each ≤20 characters, natural English phrases (no Chinese).
-           - Price suggestion: Reasonable Etsy-style price (not raw cost).
-           - Category: Etsy-style category keyword.
-        
-        IMPORTANT:
-        - Do NOT output any Chinese.
-        - Do NOT do direct word-for-word translation.
-        - Make it sound like a native Etsy seller wrote it.
-        - Use emotional and aesthetic language (kawaii, cozy, soft, dreamy style when appropriate).
-        
-        Return JSON only:
+
+        Requirements:
+        * Translate Chinese to natural, fluent English.
+        * Rewrite (not literal translation) to sound like a native Etsy seller.
+        * Optimize for Etsy SEO (keywords, engaging hooks).
+        * Use emotional and aesthetic language (kawaii, cozy, soft, dreamy style when appropriate).
+        * The final output price must be in USD (suggest a reasonable Etsy-style price).
+
+        Return JSON:
         {
           "title": "",
           "description": "",
@@ -229,20 +210,20 @@ export default function App() {
       title: data.title,
       description: data.description,
       tags: data.tags,
-      category: data.category,
       price: data.price,
+      category: data.category,
       quantity: data.quantity
     };
 
     // Try chrome.storage.local (for extension environment)
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.set({ [STORAGE_KEY_EXTENSION]: payload }, () => {
-        showStatus('success', 'Pushed to Chrome Extension storage!');
+      chrome.storage.local.set({ listingData: payload }, () => {
+        showStatus('success', '✅ Data pushed to extension!');
       });
     } else {
-      // Fallback to localStorage
-      localStorage.setItem(STORAGE_KEY_EXTENSION, JSON.stringify(payload));
-      showStatus('success', 'Pushed to localStorage (Fallback)');
+      // Fallback to localStorage for testing in browser
+      localStorage.setItem('listingData', JSON.stringify(payload));
+      showStatus('success', 'Saved to localStorage (Extension Fallback)');
     }
   };
 
