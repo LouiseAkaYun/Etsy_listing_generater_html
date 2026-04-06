@@ -1,5 +1,5 @@
 {
-  "name": "Etsy Listing Generator",
-  "description": "AI-powered dashboard to generate, edit, and manage Etsy listings from scraped product data.",
+  "name": "Etsy Listing AI Generator",
+  "description": "Clean and optimize product content from 1688/Taobao into high-converting Etsy listings using AI.",
   "requestFramePermissions": []
 }

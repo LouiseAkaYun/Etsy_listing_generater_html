@@ -16,8 +16,10 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
-  ExternalLink,
-  Copy
+  Copy,
+  LayoutDashboard,
+  Clock,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -31,8 +33,8 @@ interface ListingData {
   title: string;
   description: string;
   tags: string[];
-  category: string;
   price: string;
+  category: string;
   quantity: string;
   rawInput?: string;
 }
@@ -41,15 +43,14 @@ interface OpenAIResponse {
   title: string;
   description: string;
   tags: string[];
-  category: string;
   price: string;
-  quantity: string;
+  category: string;
 }
 
 // --- Constants ---
 
-const STORAGE_KEY_HISTORY = 'etsy_listing_history';
-const STORAGE_KEY_API_KEY = 'etsy_openai_api_key';
+const STORAGE_KEY_HISTORY = 'etsy_listing_history_v2';
+const STORAGE_KEY_API_KEY = 'etsy_openai_api_key_v2';
 const STORAGE_KEY_EXTENSION = 'listingData';
 
 export default function App() {
@@ -61,6 +62,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [isTestingKey, setIsTestingKey] = useState(false);
 
   // --- Initialization ---
   useEffect(() => {
@@ -84,7 +86,174 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(history));
   }, [history]);
 
-  const [isTestingKey, setIsTestingKey] = useState(false);
+  const saveApiKey = (key: string) => {
+    setApiKey(key);
+    localStorage.setItem(STORAGE_KEY_API_KEY, key);
+    setShowSettings(false);
+    showStatus('success', 'API Key saved successfully');
+  };
+
+  // --- Helpers ---
+  const showStatus = (type: 'success' | 'error', message: string) => {
+    setStatus({ type, message });
+    setTimeout(() => setStatus(null), 5000);
+  };
+
+  const createNewListing = () => {
+    setCurrentListing(null);
+    setRawInput('');
+  };
+
+  const deleteListing = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setHistory(prev => prev.filter(item => item.id !== id));
+    if (currentListing?.id === id) {
+      setCurrentListing(null);
+    }
+    showStatus('success', 'Listing deleted');
+  };
+
+  // --- Text Cleaning Logic ---
+  const cleanText = (text: string) => {
+    return text
+      .replace(/\s+/g, ' ') // Remove extra whitespace
+      .replace(/收藏|客服|立即购买|加入购物车/g, '') // Remove noise words
+      .trim()
+      .slice(0, 3000); // Limit to 3000 chars
+  };
+
+  // --- AI Logic ---
+  const generateListing = async () => {
+    if (!apiKey) {
+      setShowSettings(true);
+      showStatus('error', 'Please enter your OpenAI API Key first');
+      return;
+    }
+
+    if (!rawInput.trim()) {
+      showStatus('error', 'Please paste some product content first');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const cleanedContent = cleanText(rawInput);
+      
+      const prompt = `
+        You are an Etsy SEO expert.
+        The input may contain Chinese or mixed-language product content.
+        Your job:
+        1. Translate ALL content into natural, fluent English.
+        2. Extract key product information.
+        3. Rewrite it into a high-converting Etsy listing.
+        
+        Based on the content below:
+        
+        [CONTENT]
+        ${cleanedContent}
+        
+        Do the following:
+        1. Identify:
+           - Product name
+           - Key features
+           - Materials
+           - Target audience
+           - Use cases
+        2. Generate:
+           - Title (≤140 characters): Clear, keyword-rich, natural English. Avoid awkward literal translations.
+           - Description: Engaging and benefit-focused, written for US buyers. Highlight use cases and emotional appeal.
+           - 13 SEO Tags: Each ≤20 characters, natural English phrases (no Chinese).
+           - Price suggestion: Reasonable Etsy-style price (not raw cost).
+           - Category: Etsy-style category keyword.
+        
+        IMPORTANT:
+        - Do NOT output any Chinese.
+        - Do NOT do direct word-for-word translation.
+        - Make it sound like a native Etsy seller wrote it.
+        - Use emotional and aesthetic language (kawaii, cozy, soft, dreamy style when appropriate).
+        
+        Return JSON only:
+        {
+          "title": "",
+          "description": "",
+          "tags": [],
+          "price": "9.99",
+          "category": ""
+        }
+      `;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          response_format: { type: 'json_object' }
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const errorMessage = data?.error?.message || response.statusText || `Status ${response.status}`;
+        throw new Error(`OpenAI API Error: ${errorMessage}`);
+      }
+
+      const content: OpenAIResponse = JSON.parse(data.choices[0].message.content);
+
+      const newListing: ListingData = {
+        id: Date.now().toString(),
+        timestamp: Date.now(),
+        ...content,
+        quantity: "999",
+        rawInput
+      };
+
+      setCurrentListing(newListing);
+      setHistory(prev => [newListing, ...prev]);
+      showStatus('success', 'Listing generated successfully!');
+    } catch (error) {
+      console.error(error);
+      showStatus('error', error instanceof Error ? error.message : 'Failed to generate listing');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // --- Extension Push ---
+  const pushToEtsy = (data: ListingData) => {
+    const payload = {
+      title: data.title,
+      description: data.description,
+      tags: data.tags,
+      category: data.category,
+      price: data.price,
+      quantity: data.quantity
+    };
+
+    // Try chrome.storage.local (for extension environment)
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ [STORAGE_KEY_EXTENSION]: payload }, () => {
+        showStatus('success', 'Pushed to Chrome Extension storage!');
+      });
+    } else {
+      // Fallback to localStorage
+      localStorage.setItem(STORAGE_KEY_EXTENSION, JSON.stringify(payload));
+      showStatus('success', 'Pushed to localStorage (Fallback)');
+    }
+  };
+
+  const handleUpdateField = (field: keyof ListingData, value: any) => {
+    if (!currentListing) return;
+    const updated = { ...currentListing, [field]: value };
+    setCurrentListing(updated);
+    
+    // Update in history too
+    setHistory(prev => prev.map(item => item.id === updated.id ? updated : item));
+  };
 
   const testApiKey = async (key: string) => {
     if (!key) {
@@ -119,147 +288,14 @@ export default function App() {
     }
   };
 
-  const saveApiKey = (key: string) => {
-    setApiKey(key);
-    localStorage.setItem(STORAGE_KEY_API_KEY, key);
-    setShowSettings(false);
-    showStatus('success', 'API Key saved successfully');
-  };
-
-  // --- Helpers ---
-  const showStatus = (type: 'success' | 'error', message: string) => {
-    setStatus({ type, message });
-    setTimeout(() => setStatus(null), 5000);
-  };
-
-  const createNewListing = () => {
-    setCurrentListing(null);
-    setRawInput('');
-  };
-
-  const deleteListing = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setHistory(prev => prev.filter(item => item.id !== id));
-    if (currentListing?.id === id) {
-      setCurrentListing(null);
-    }
-    showStatus('success', 'Listing deleted');
-  };
-
-  // --- AI Logic ---
-  const generateListing = async () => {
-    if (!apiKey) {
-      setShowSettings(true);
-      showStatus('error', 'Please enter your OpenAI API Key first');
-      return;
-    }
-
-    if (!rawInput.trim()) {
-      showStatus('error', 'Please paste some JSON data first');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const prompt = `
-        You are an expert Etsy SEO specialist. 
-        Translate the following Chinese product JSON data into English and optimize it for Etsy.
-        
-        Output strictly as a JSON object with these fields:
-        {
-          "title": "Optimized English title, max 140 chars",
-          "description": "Detailed English description with features and benefits",
-          "tags": ["13 tags, each max 20 chars, SEO optimized"],
-          "category": "Suggested Etsy category",
-          "price": "Suggested price in USD based on data",
-          "quantity": "999"
-        }
-
-        Input Data:
-        ${rawInput}
-      `;
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
-          response_format: { type: 'json_object' }
-        })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        const errorMessage = data?.error?.message || response.statusText || `Status ${response.status}`;
-        throw new Error(`OpenAI API Error: ${errorMessage}`);
-      }
-
-      const content: OpenAIResponse = JSON.parse(data.choices[0].message.content);
-
-      const newListing: ListingData = {
-        id: Date.now().toString(),
-        timestamp: Date.now(),
-        ...content,
-        rawInput
-      };
-
-      setCurrentListing(newListing);
-      setHistory(prev => [newListing, ...prev]);
-      pushToExtension(newListing);
-      showStatus('success', 'Listing generated and pushed!');
-    } catch (error) {
-      console.error(error);
-      showStatus('error', error instanceof Error ? error.message : 'Failed to generate listing');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // --- Extension Push ---
-  const pushToExtension = (data: ListingData) => {
-    const payload = {
-      title: data.title,
-      description: data.description,
-      tags: data.tags,
-      category: data.category,
-      price: data.price,
-      quantity: data.quantity
-    };
-
-    // Try chrome.storage.local (for extension environment)
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.set({ [STORAGE_KEY_EXTENSION]: payload }, () => {
-        console.log('Data pushed to chrome.storage.local');
-      });
-    } else {
-      // Fallback to localStorage
-      localStorage.setItem(STORAGE_KEY_EXTENSION, JSON.stringify(payload));
-      console.log('Data pushed to localStorage (fallback)');
-    }
-  };
-
-  const handleUpdateField = (field: keyof ListingData, value: any) => {
-    if (!currentListing) return;
-    const updated = { ...currentListing, [field]: value };
-    setCurrentListing(updated);
-    
-    // Update in history too
-    setHistory(prev => prev.map(item => item.id === updated.id ? updated : item));
-  };
-
   return (
     <div className="flex h-screen bg-[#FBFBFA] text-[#37352F] font-sans overflow-hidden">
       {/* --- Sidebar --- */}
       <aside className="w-64 border-r border-[#E9E9E7] bg-[#F7F7F5] flex flex-col shrink-0">
         <div className="p-4 flex items-center justify-between border-b border-[#E9E9E7]">
           <h1 className="font-semibold text-sm tracking-tight flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-orange-500" />
-            Etsy AI
+            <LayoutDashboard className="w-4 h-4 text-orange-500" />
+            Etsy Generator
           </h1>
           <button 
             onClick={createNewListing}
@@ -271,12 +307,13 @@ export default function App() {
         </div>
 
         <div className="flex-1 overflow-y-auto py-2">
-          <div className="px-3 mb-2 text-[11px] font-bold text-[#9B9A97] uppercase tracking-wider">
+          <div className="px-3 mb-2 text-[11px] font-bold text-[#9B9A97] uppercase tracking-wider flex items-center gap-1.5">
+            <Clock className="w-3 h-3" />
             History
           </div>
           {history.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-[#9B9A97]">
-              No listings yet
+              No history found
             </div>
           ) : (
             history.map((item) => (
@@ -290,8 +327,7 @@ export default function App() {
                   currentListing?.id === item.id ? 'bg-[#E9E9E7]' : 'hover:bg-[#E9E9E7]'
                 }`}
               >
-                <History className="w-3.5 h-3.5 text-[#9B9A97]" />
-                <span className="truncate flex-1">{item.title || 'Untitled Listing'}</span>
+                <div className="truncate flex-1">{item.title || 'Untitled Listing'}</div>
                 <Trash2 
                   className="w-3.5 h-3.5 text-[#9B9A97] opacity-0 group-hover:opacity-100 hover:text-red-500 transition-opacity" 
                   onClick={(e) => deleteListing(item.id, e)}
@@ -335,26 +371,26 @@ export default function App() {
           {/* Input Section */}
           <section className="mb-12">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-2xl font-bold tracking-tight">Generate Listing</h2>
+              <h2 className="text-2xl font-bold tracking-tight">Paste Product Page Content</h2>
               <button
                 onClick={generateListing}
                 disabled={isLoading}
                 className="bg-[#37352F] text-white px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 hover:bg-[#47453F] transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
               >
                 {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                Generate + Push
+                Generate Listing
               </button>
             </div>
             <div className="relative">
               <textarea
                 value={rawInput}
                 onChange={(e) => setRawInput(e.target.value)}
-                placeholder="Paste 1688 scraper JSON here..."
+                placeholder="Paste messy text from 1688/Taobao product page..."
                 className="w-full h-48 p-4 bg-white border border-[#E9E9E7] rounded-xl focus:ring-2 focus:ring-[#37352F]/10 focus:border-[#37352F] outline-none transition-all resize-none text-sm font-mono"
               />
               {!rawInput && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-[#9B9A97] text-sm italic">
-                  Paste raw Chinese product data to begin
+                  Content will be cleaned and limited to 3000 chars
                 </div>
               )}
             </div>
@@ -449,26 +485,19 @@ export default function App() {
 
                   <div className="mt-12 flex justify-end gap-3">
                     <button 
-                      onClick={() => pushToExtension(currentListing)}
-                      className="px-4 py-2 border border-[#E9E9E7] rounded-md text-sm font-medium hover:bg-[#F7F7F5] transition-colors flex items-center gap-2"
+                      onClick={() => pushToEtsy(currentListing)}
+                      className="px-6 py-2.5 bg-[#37352F] text-white rounded-md text-sm font-medium hover:bg-[#47453F] transition-colors flex items-center gap-2 shadow-sm"
                     >
                       <Send className="w-4 h-4" />
-                      Push to Extension
-                    </button>
-                    <button 
-                      onClick={() => showStatus('success', 'Changes saved to history')}
-                      className="px-4 py-2 bg-[#37352F] text-white rounded-md text-sm font-medium hover:bg-[#47453F] transition-colors flex items-center gap-2"
-                    >
-                      <Save className="w-4 h-4" />
-                      Save Changes
+                      Push to Etsy
                     </button>
                   </div>
                 </div>
               </motion.section>
             ) : (
               <div className="flex flex-col items-center justify-center py-20 text-[#9B9A97]">
-                <Sparkles className="w-12 h-12 mb-4 opacity-20" />
-                <p className="text-sm">Paste JSON above to generate your first listing</p>
+                <Sparkles className="w-12 h-12 mb-4 opacity-10" />
+                <p className="text-sm">Paste product content above to generate your listing</p>
               </div>
             )}
           </AnimatePresence>
