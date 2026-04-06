@@ -216,16 +216,32 @@ export default function App() {
     };
 
     // Send message to Chrome Extension via runtime.sendMessage
-    // This is the standard way for a web page to talk to a content script
-    chrome.runtime.sendMessage({
-      type: "SET_ETSY_DATA",
-      payload: data
-    }, "*");
+    // This is used when the dashboard is externally connectable or part of the extension
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        chrome.runtime.sendMessage({
+          type: "SET_ETSY_DATA",
+          payload: payload
+        }, (response: any) => {
+          if (chrome.runtime.lastError) {
+            console.warn('Chrome runtime error:', chrome.runtime.lastError);
+            showStatus('error', 'Extension not found or not responding');
+          } else {
+            console.log('Extension response:', response);
+            showStatus('success', '✅ Sent to extension!');
+          }
+        });
+      } catch (e) {
+        console.error('Failed to send message to extension:', e);
+        showStatus('error', 'Failed to communicate with extension');
+      }
+    } else {
+      // Fallback for preview/web environment
+      showStatus('error', 'Chrome extension environment not detected');
+    }
 
-    // Also save to localStorage as a backup/fallback
+    // Always save to localStorage as a backup/fallback
     localStorage.setItem('listingData', JSON.stringify(payload));
-    
-    showStatus('success', '✅ Sent to extension!');
   };
 
   const handleUpdateField = (field: keyof ListingData, value: any) => {
