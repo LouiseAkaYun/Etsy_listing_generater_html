@@ -215,11 +215,11 @@ export default function App() {
       quantity: data.quantity
     };
 
-    // Send message to Chrome Extension via window.postMessage
+    // Send message to Chrome Extension via runtime.sendMessage
     // This is the standard way for a web page to talk to a content script
-    window.postMessage({
+    chrome.runtime.sendMessage({
       type: "SET_ETSY_DATA",
-      payload: payload
+      payload: data
     }, "*");
 
     // Also save to localStorage as a backup/fallback
